@@ -1,0 +1,63 @@
+name: Reserve Desk Mosaic seat
+
+on:
+  schedule:
+    # 00:00-00:30 JST: retry every five minutes when a new date opens.
+    - cron: "0,5,10,15,20,25,30 15 * * *"
+    # Hourly retry for dates added after the midnight window or transient failures.
+    - cron: "0 0-14,16-23 * * *"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Optional one-off date (YYYY-MM-DD); blank uses config/reservations.json"
+        required: false
+        type: string
+      dry_run:
+        description: "Verify login, date, seat, and form without reserving"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desk-mosaic-reservation
+  cancel-in-progress: false
+
+jobs:
+  reserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DESK_MOSAIC_EMAIL: ${{ secrets.DESK_MOSAIC_EMAIL }}
+      DESK_MOSAIC_PASSWORD: ${{ secrets.DESK_MOSAIC_PASSWORD }}
+      TARGET_DATE: ${{ inputs.target_date }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Reserve So02
+        run: pnpm reserve
