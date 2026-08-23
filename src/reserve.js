@@ -171,16 +171,26 @@ async function reserveDate(page, config, email, entry) {
   );
   await form.locator("#btnAddRsv").click();
   const response = await responsePromise;
-  const responseBody = await response.text();
+  const responseStatus = response.status();
+  const responseOk = response.ok();
+  let responseBody = "";
+  if (!responseOk) {
+    try {
+      responseBody = await response.text();
+    } catch {
+      // The site can navigate immediately after submission, which discards
+      // the response body even though its HTTP status remains available.
+    }
+  }
   await page.waitForTimeout(500);
 
   const alert = page.locator("#alertAddRsv");
   if (await alert.isVisible()) {
     const message = (await page.locator("#alertMsgAddRsv").innerText()).trim();
-    throw new Error(`[${entry.date}] Reservation was rejected: ${message || `HTTP ${response.status()}`}`);
+    throw new Error(`[${entry.date}] Reservation was rejected: ${message || `HTTP ${responseStatus}`}`);
   }
-  if (!response.ok()) {
-    throw new Error(`[${entry.date}] Reservation API returned HTTP ${response.status()}: ${responseBody.slice(0, 300)}`);
+  if (!responseOk) {
+    throw new Error(`[${entry.date}] Reservation API returned HTTP ${responseStatus}: ${responseBody.slice(0, 300)}`);
   }
 
   console.log(`[${entry.date}] Reserved ${config.mapName} / ${config.seatId} / 09:00-17:30.`);
