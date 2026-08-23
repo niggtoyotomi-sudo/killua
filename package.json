@@ -1,0 +1,17 @@
+{
+  "name": "desk-mosaic-reservation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reserve Desk Mosaic seat So02 from GitHub Actions.",
+  "scripts": {
+    "reserve": "node src/reserve.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}
