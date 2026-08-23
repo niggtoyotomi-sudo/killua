@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright";
 import { classifyDates, loadConfig } from "./config.js";
-import { toSiteDate } from "./date.js";
+import { calendarDayDifference, toSiteDate } from "./date.js";
 
 const rootDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const configPath = process.env.RESERVATION_CONFIG || path.join(rootDirectory, "config", "reservations.json");
@@ -56,29 +56,40 @@ async function setMap(page, config) {
   }
 }
 
-async function moveToDate(page, targetDate, daysAhead) {
+async function moveToDate(page, targetDate) {
   const expectedSiteDate = toSiteDate(targetDate);
-  const displayedDate = page.locator("#inputSearchDate");
-  await displayedDate.waitFor({ state: "attached", timeout: 30_000 });
+  const mapDates = page.locator(".js-dp-map-area");
+  await mapDates.first().waitFor({ state: "attached", timeout: 30_000 });
+  const initialSiteDate = await mapDates.first().inputValue();
+  const initialDate = initialSiteDate.replaceAll("/", "-");
+  const steps = calendarDayDifference(initialDate, targetDate);
+  if (steps < 0) {
+    throw new Error(`Cannot navigate backward from ${initialDate} to ${targetDate}`);
+  }
 
-  for (let index = 0; index < daysAhead; index += 1) {
+  for (let index = 0; index < steps; index += 1) {
     const nextButton = page.locator(".js-increment-date:visible").first();
     await nextButton.click({ timeout: 20_000 });
     const expectedStepDate = toSiteDate(
-      new Date(Date.parse(`${targetDate}T00:00:00Z`) - (daysAhead - index - 1) * 86_400_000)
+      new Date(Date.parse(`${initialDate}T00:00:00Z`) + (index + 1) * 86_400_000)
         .toISOString()
         .slice(0, 10)
     );
-    await page.waitForFunction(
-      (value) => document.querySelector("#inputSearchDate")?.value === value,
-      expectedStepDate,
-      { timeout: 20_000 }
-    );
+    try {
+      await page.waitForFunction(
+        (value) => [...document.querySelectorAll(".js-dp-map-area")].some((element) => element.value === value),
+        expectedStepDate,
+        { timeout: 20_000 }
+      );
+    } catch (error) {
+      const observed = await mapDates.evaluateAll((elements) => elements.map((element) => element.value));
+      throw new Error(`Date navigation timed out: expected ${expectedStepDate}, observed ${observed.join(", ")}`, { cause: error });
+    }
   }
 
-  const actual = await displayedDate.inputValue();
-  if (actual !== expectedSiteDate) {
-    throw new Error(`Date navigation failed: expected ${expectedSiteDate}, got ${actual}`);
+  const actualDates = await mapDates.evaluateAll((elements) => elements.map((element) => element.value));
+  if (!actualDates.includes(expectedSiteDate)) {
+    throw new Error(`Date navigation failed: expected ${expectedSiteDate}, got ${actualDates.join(", ")}`);
   }
 }
 
@@ -99,7 +110,7 @@ async function reserveDate(page, config, email, entry) {
     timeout: 60_000
   });
   await setMap(page, config);
-  await moveToDate(page, entry.date, entry.daysAhead);
+  await moveToDate(page, entry.date);
 
   const seat = page.locator(`[data-seat-id="${config.seatId}"]`);
   await seat.waitFor({ state: "visible", timeout: 30_000 });
@@ -215,3 +226,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 }
 
 export { existingReservationState };
+
