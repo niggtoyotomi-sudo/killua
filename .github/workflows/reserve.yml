@@ -19,7 +19,7 @@ on:
         type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: desk-mosaic-reservation
@@ -60,4 +60,20 @@ jobs:
         run: pnpm test
 
       - name: Reserve So02
+        id: reserve
         run: pnpm reserve
+
+      - name: Persist completed reservation dates
+        if: always()
+        shell: bash
+        run: |
+          if git diff --quiet -- config/reservations.json; then
+            echo "No completed dates to persist."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config/reservations.json
+          git commit -m "Remove completed reservation dates [skip ci]"
+          git push
+
