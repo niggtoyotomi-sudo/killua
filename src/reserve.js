@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { chromium } from "playwright";
@@ -188,6 +189,7 @@ async function reserveDate(page, config, email, entry) {
 
 export async function main() {
   const config = await loadConfig(configPath, process.env.TARGET_DATE || undefined);
+  const usesConfigDates = !process.env.TARGET_DATE;
   const classified = classifyDates(config);
   const eligible = classified.filter(({ status }) => status === "eligible");
 
@@ -212,12 +214,16 @@ export async function main() {
   });
   const page = await context.newPage();
   const failures = [];
+  const completedDates = new Set();
 
   try {
     await signIn(page, config, email, password);
     for (const entry of eligible) {
       try {
-        await reserveDate(page, config, email, entry);
+        const result = await reserveDate(page, config, email, entry);
+        if (!dryRun && usesConfigDates && ["reserved", "already-reserved"].includes(result)) {
+          completedDates.add(entry.date);
+        }
       } catch (error) {
         failures.push(error);
         console.error(error.message);
@@ -225,6 +231,12 @@ export async function main() {
     }
   } finally {
     await browser.close();
+  }
+
+  if (completedDates.size > 0) {
+    config.dates = config.dates.filter((date) => !completedDates.has(date));
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    console.log(`Removed completed date(s) from config: ${[...completedDates].join(", ")}`);
   }
 
   if (failures.length > 0) {
