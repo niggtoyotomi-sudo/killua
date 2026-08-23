@@ -68,23 +68,37 @@ async function moveToDate(page, targetDate) {
   }
 
   for (let index = 0; index < steps; index += 1) {
-    const nextButton = page.locator(".js-increment-date:visible").first();
-    await nextButton.click({ timeout: 20_000 });
     const expectedStepDate = toSiteDate(
       new Date(Date.parse(`${initialDate}T00:00:00Z`) + (index + 1) * 86_400_000)
         .toISOString()
         .slice(0, 10)
     );
-    try {
-      await page.waitForFunction(
-        (value) => [...document.querySelectorAll(".js-dp-map-area")].some((element) => element.value === value),
-        expectedStepDate,
-        { timeout: 20_000 }
-      );
-    } catch (error) {
-      const observed = await mapDates.evaluateAll((elements) => elements.map((element) => element.value));
-      throw new Error(`Date navigation timed out: expected ${expectedStepDate}, observed ${observed.join(", ")}`, { cause: error });
+
+    let moved = false;
+    let lastError;
+    for (let attempt = 1; attempt <= 2 && !moved; attempt += 1) {
+      const nextButton = page.locator(".js-increment-date:visible").first();
+      await nextButton.click({ timeout: 20_000 });
+      try {
+        await page.waitForFunction(
+          (value) => [...document.querySelectorAll(".js-dp-map-area")].some((element) => element.value === value),
+          expectedStepDate,
+          { timeout: 20_000 }
+        );
+        moved = true;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await page.waitForTimeout(1_500);
+      }
     }
+    if (!moved) {
+      const observed = await mapDates.evaluateAll((elements) => elements.map((element) => element.value));
+      throw new Error(`Date navigation timed out: expected ${expectedStepDate}, observed ${observed.join(", ")}`, { cause: lastError });
+    }
+
+    // Desk Mosaic refreshes the floor map asynchronously after the date changes.
+    // Moving again immediately can be ignored while that refresh is still running.
+    await page.waitForTimeout(1_500);
   }
 
   const actualDates = await mapDates.evaluateAll((elements) => elements.map((element) => element.value));
